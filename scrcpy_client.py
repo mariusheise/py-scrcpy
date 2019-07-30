@@ -20,24 +20,26 @@ import io
 import time
 import numpy as np
 import logging
+import cv2
+import pathlib
 
 from threading import Thread
 from queue import Queue, Empty
 
-SVR_maxSize = 600
-SVR_bitRate = 999999999
+SVR_maxSize = 0
+SVR_bitRate = 8000000
 SVR_tunnelForward = "true"
-SVR_crop = "9999:9999:0:0"
-SVR_sendFrameMeta = "true"
+SVR_crop = "false"
+SVR_sendFrameMeta = "false"
 
 IP = '127.0.0.1'
 PORT = 8080
 RECVSIZE = 0x10000
 HEADER_SIZE  = 12
 
-SCRCPY_dir = 'C:\\Users\\Al\\Downloads\\scrcpy-win64-v1.5\\scrcpy-win64\\'
-FFMPEG_bin = 'ffmpeg'
-ADB_bin = os.path.join(SCRCPY_dir,"adb")
+SCRCPY_dir = pathlib.Path(__file__).parent
+FFMPEG_bin = '/usr/bin/ffmpeg'
+ADB_bin = '/usr/bin/adb'
 #fd = open("savesocksession",'wb')
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,7 @@ class SCRCPY_client():
         while self.ACTIVE:
             rd = self.ffm.stderr.readline()
             if rd:
+                print(rd.decode("utf-8"))
                 self.FFmpeg_info.append(rd.decode("utf-8"))
         logger.info("FINISH STDERR THREAD")
 
@@ -77,22 +80,7 @@ class SCRCPY_client():
         logger.info("START STDIN THREAD")
         
         while self.ACTIVE:
-            if SVR_sendFrameMeta:
-                header = self.sock.recv(HEADER_SIZE)
-                #fd.write(header)
-                pts = int.from_bytes(header[:8],
-                    byteorder='big', signed=False)
-                frm_len = int.from_bytes(header[8:],
-                    byteorder='big', signed=False)
-                
-                
-               
-                data = self.sock.recv(frm_len)
-                #fd.write(data)
-                self.bytes_sent += len(data)
-                self.ffm.stdin.write(data)
-            else:
-                data = self.sock.recv(RECVSIZE)
+                data = self.sock_video.recv(RECVSIZE)
                 self.bytes_sent += len(data)
                 self.ffm.stdin.write(data)
 
@@ -116,11 +104,15 @@ class SCRCPY_client():
         # PIL.Image.fromarray(np.uint8(rgb_img*255))
 
     def connect(self):
-        logger.info("Connecting")
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.connect((IP, PORT))
+        logger.info("Connecting video socket")
+        self.sock_video = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock_video.connect((IP, PORT))
 
-        DUMMYBYTE = self.sock.recv(1)
+        logger.info("Connecting control socket")
+        self.sock_control = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock_control.connect((IP, PORT))
+
+        DUMMYBYTE = self.sock_video.recv(1)
         #fd.write(DUMMYBYTE)
         if not len(DUMMYBYTE):
             raise ConnectionError("Did not recieve Dummy Byte!")
@@ -128,7 +120,7 @@ class SCRCPY_client():
             logger.info("Connected!")
 
         # Receive device specs
-        devname = self.sock.recv(64)
+        devname = self.sock_video.recv(64)
         #fd.write(devname)
         self.deviceName = devname.decode("utf-8")
         
@@ -136,7 +128,7 @@ class SCRCPY_client():
             raise ConnectionError("Did not recieve Device Name!")
         logger.info("Device Name: "+self.deviceName)
         
-        res = self.sock.recv(4)
+        res = self.sock_video.recv(4)
         #fd.write(res)
         self.WIDTH, self.HEIGHT = struct.unpack(">HH", res)
         logger.info("WxH: "+str(self.WIDTH)+"x"+str(self.HEIGHT))
@@ -147,8 +139,8 @@ class SCRCPY_client():
         
     def start_processing(self, connect_attempts=200):
         # Set up FFmpeg 
-        ffmpegCmd = [FFMPEG_bin, '-y',
-                     '-r', '20', '-i', 'pipe:0',
+        ffmpegCmd = [FFMPEG_bin, '-i', 'pipe:0',
+                     '-f', 'h264',
                      '-vcodec', 'rawvideo',
                      '-pix_fmt', 'rgb24',
                      '-f', 'image2pipe',
@@ -234,7 +226,7 @@ def connect_and_forward_scrcpy():
             'CLASSPATH=/data/local/tmp/scrcpy-server.jar',
             'app_process','/','com.genymobile.scrcpy.Server',
             str(SVR_maxSize),str(SVR_bitRate),
-            SVR_tunnelForward, SVR_crop, SVR_sendFrameMeta],
+            SVR_tunnelForward, '-', SVR_crop, SVR_sendFrameMeta],
             cwd=SCRCPY_dir)
         time.sleep(1)
         
@@ -243,7 +235,7 @@ def connect_and_forward_scrcpy():
             [ADB_bin,'forward',
             'tcp:8080','localabstract:scrcpy'],
             cwd=SCRCPY_dir).wait()
-        time.sleep(1)
+        time.sleep(2)
     except FileNotFoundError:
         raise FileNotFoundError("Couldn't find ADB at path ADB_bin: "+
                     str(ADB_bin))
@@ -259,7 +251,6 @@ if __name__ == "__main__":
     SCRCPY.connect()
     SCRCPY.start_processing()
     
-    import cv2
     try:
         while True:
             frm = SCRCPY.get_next_frame(most_recent=False)
