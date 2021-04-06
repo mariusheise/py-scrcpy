@@ -29,8 +29,8 @@ from queue import Queue, Empty
 SVR_maxSize = 0
 SVR_bitRate = 8000000
 SVR_tunnelForward = "true"
-SVR_crop = "false"
-SVR_sendFrameMeta = "false"
+SVR_crop = "-"
+SVR_sendFrameMeta = "true"
 
 IP = '127.0.0.1'
 PORT = 8080
@@ -222,11 +222,24 @@ def connect_and_forward_scrcpy():
         '''
         logger.info("Run JAR")
         subprocess.Popen(
-            [ADB_bin,'shell',
-            'CLASSPATH=/data/local/tmp/scrcpy-server.jar',
-            'app_process','/','com.genymobile.scrcpy.Server',
-            str(SVR_maxSize),str(SVR_bitRate),
-            SVR_tunnelForward, '-', SVR_crop, SVR_sendFrameMeta],
+            [ADB_bin, 'shell',
+             'CLASSPATH=/data/local/tmp/scrcpy-server.jar',
+             'app_process', '/', 'com.genymobile.scrcpy.Server',
+             '1.17',             # client version
+             'debug',            # log level
+             str(SVR_maxSize),   # max size
+             str(SVR_bitRate),   # bit rate
+             '60',               # max fps
+             '0',                # lock video orientation
+             SVR_tunnelForward,  # tunnel forward
+             SVR_crop,           # crop
+             SVR_sendFrameMeta,  # send frame metadata
+             'true',             # control
+             '0',                # display id
+             'true',             # show touches
+             'true',             # stay awake
+             '-',                # codec options
+             '-'],               # encoder name
             cwd=SCRCPY_dir)
         time.sleep(1)
         
